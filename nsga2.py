@@ -1,35 +1,15 @@
-import numpy as np
+import argparse
 import autograd.numpy as anp
 import matplotlib.pyplot as plt
 
 from pymoo.optimize import minimize
+from pymoo.util.remote import Remote
 from pymoo.core.problem import Problem
-from pymoo.core.problem import ElementwiseProblem
 from pymoo.factory import get_termination
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.factory import get_sampling, get_crossover, get_mutation
 
-
-class FirstProblem(ElementwiseProblem):
-
-    def __init__(self):
-        super().__init__(n_var=2,
-                         n_obj=2,
-                         n_constr=2,
-                         xl=np.array([-2,-2]),
-                         xu=np.array([2,2]))
-
-    def _evaluate(self, x, out, *args, **kwargs):
-        
-        f1 = 100 * (x[0]**2 + x[1]**2)
-        f2 = (x[0]-1)**2 + x[1]**2
-
-        g1 = 2*(x[0]-0.1) * (x[0]-0.9) / 0.18
-        g2 = - 20*(x[0]-0.4) * (x[0]-0.6) / 4.8
-
-        out["F"] = [f1, f2]
-        out["G"] = [g1, g2]
-
+  
 
 # Definition of the BNH problem as it is presented in the article - 2 vars, 2 objectives and 2 constraints.
 class BNH(Problem):
@@ -56,21 +36,50 @@ class BNH(Problem):
         X = anp.column_stack([x1, x2])
         return self.evaluate(X, return_values_of=["F"])
 
+# Definition of the Kursawe problem as it is presented in the article - 3 vars, 2 objectives.
+class Kursawe(Problem):
+    def __init__(self):
+        super().__init__(n_var=3, n_obj=2, n_constr=0, xl=-5, xu=5, type_var=anp.double)
 
+    def _evaluate(self, x, out, *args, **kwargs):
+        l = []
+        
+        for i in range(2):
+            l.append(-10 * anp.exp(-0.2 * anp.sqrt(anp.square(x[:, i]) + anp.square(x[:, i + 1]))))
+
+        f1 = anp.sum(anp.column_stack(l), axis=1)
+        f2 = anp.sum(anp.power(anp.abs(x), 0.8) + 5 * anp.sin(anp.power(x, 3)), axis=1)
+
+        out["F"] = anp.column_stack([f1, f2])
+
+    def _calc_pareto_front(self, *args, **kwargs):
+        return Remote.get_instance().load("pf", "kursawe.pf")
+
+
+        
 if __name__ == "__main__":
-    problem = BNH()
-    
+    problem_dict = {
+        "kursawe" : Kursawe,
+        "bnh" : BNH,
+    }
+    parser = argparse.ArgumentParser()
+    parser.add_argument("problem", help="List of problems tou can choose", choices=["kursawe", "bnh"],)
+    parser.add_argument("generations", help="Number of iterations for the algorithm", type=int,)
+    args = parser.parse_args()
+
+    problem = problem_dict[args.problem]()
     # Definition of the different parameters of the algorithm
     algorithm = NSGA2(
-        pop_size=100,
+        pop_size=40,
         n_offsprings=10,
         sampling=get_sampling("real_random"),
         crossover=get_crossover("real_sbx", prob=0.9, eta=15),
         mutation=get_mutation("real_pm", eta=20),
         eliminate_duplicates=True
     )
+
     # Number of iteration the algorithm will do
-    termination = get_termination("n_gen", 40)
+    termination = get_termination("n_gen", args.generations)
 
     # Solve the problem and return the result
     result = minimize(problem,
@@ -81,6 +90,7 @@ if __name__ == "__main__":
                       verbose=True)
 
     X = result.X
+    print(X)
     F = result.F
 
     xl, xu = problem.bounds()
